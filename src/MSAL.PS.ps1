@@ -70,15 +70,13 @@ $ModuleManifest = Import-PowershellDataFile (Join-Path $PSScriptRoot 'MSAL.PS.ps
 #     }
 # }
 if ($PSVersionTable.PSEdition -eq 'Core') {
-    foreach ($Path in ($ModuleManifest.FileList -like "*\Microsoft.Identity.Client.*\netcoreapp*\*.dll")) {
-        $RequiredAssemblies.Add((Join-Path $PSScriptRoot $Path))
-    }
+    # Handle .NET Core assembly loading
+    $RequiredAssemblies.AddRange([string[]](Join-Path $PSScriptRoot 'Microsoft.Identity.Client.*\netstandard2.0\Microsoft.Identity.Client.*.dll' -Resolve))
     $RequiredAssemblies.AddRange([string[]](Join-Path $PSScriptRoot 'Microsoft.Web.WebView2.*\netcoreapp3.0\Microsoft.Web.WebView2.*.dll' -Resolve))
 }
 elseif ($PSVersionTable.PSEdition -eq 'Desktop') {
-    foreach ($Path in ($ModuleManifest.FileList -like "*\Microsoft.Identity.Client.*\net4*\*.dll")) {
-        $RequiredAssemblies.Add((Join-Path $PSScriptRoot $Path))
-    }
+    # Handle .NET Framework assembly loading
+    $RequiredAssemblies.AddRange([string[]](Join-Path $PSScriptRoot 'Microsoft.Identity.Client.*\net462\Microsoft.Identity.Client.*.dll' -Resolve))
     $RequiredAssemblies.AddRange([string[]](Join-Path $PSScriptRoot 'Microsoft.Web.WebView2.*\net45\Microsoft.Web.WebView2.*.dll' -Resolve))
 }
 

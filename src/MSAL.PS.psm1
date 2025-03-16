@@ -17,14 +17,22 @@ if ($PSBoundParameters.ContainsKey('ModuleConfiguration')) { Set-Config $ModuleC
 #Export-Config
 
 $script:ModuleFeatureSupport = [ordered]@{
-    WebView1Support        = $PSVersionTable.PSEdition -eq 'Desktop'
-    WebView2Support        = [System.Environment]::OSVersion.Platform -eq 'Win32NT' -and [System.Environment]::Is64BitProcess -and ($PSVersionTable.PSVersion -lt [version]'6.0' -or $PSVersionTable.PSVersion -ge [version]'7.0' -and (Get-Item 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}' -ErrorAction SilentlyContinue))
-    #EmbeddedWebViewSupport = $WebView1Support -or $WebView2Support
-    DeviceCodeSupport      = $true
-    TokenCacheSupport      = [System.Environment]::OSVersion.Platform -eq 'Win32NT' -and $PSVersionTable.PSVersion -lt [version]'6.0'
-    AuthBrokerSupport      = [System.Environment]::OSVersion.Platform -eq 'Win32NT' -and $PSVersionTable.PSVersion -lt [version]'7.0'
+    WebView1Support   = $PSVersionTable.PSEdition -eq 'Desktop'
+    WebView2Support   = [System.Environment]::OSVersion.Platform -eq 'Win32NT' -and [System.Environment]::Is64BitProcess -and ($PSVersionTable.PSVersion -lt [version]'6.0' -or $PSVersionTable.PSVersion -ge [version]'7.0' -and (Get-Item 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}' -ErrorAction SilentlyContinue))
+    DeviceCodeSupport = $true
+    TokenCacheSupport = [System.Environment]::OSVersion.Platform -eq 'Win32NT' -and $PSVersionTable.PSVersion -lt [version]'6.0'
+    AuthBrokerSupport = [System.Environment]::OSVersion.Platform -eq 'Win32NT' -and $PSVersionTable.PSVersion -lt [version]'7.0'
+    WAMSupport        = [System.Environment]::OSVersion.Platform -eq 'Win32NT' -and [System.Environment]::OSVersion.Version -ge [version]'10.0.17763'
+    CAESupport        = $true
 }
 
+# Initialize module state
+if (-not (Get-Variable -Name ModuleState -Scope Script -ErrorAction SilentlyContinue)) {
+    $script:ModuleState = @{
+        DeviceRegistrationStatus = @{}
+        UseWebView2 = $false
+    }
+}
 ## PowerShell Desktop 5.1 does not dot-source ScriptsToProcess when a specific version is specified on import. This is a bug.
 # if ($PSEdition -eq 'Desktop') {
 #     $ModuleManifest = Import-PowershellDataFile (Join-Path $PSScriptRoot $MyInvocation.MyCommand.Name.Replace('.psm1','.psd1'))
@@ -41,7 +49,4 @@ $script:ModuleFeatureSupport = [ordered]@{
 ## Global Variables
 [System.Collections.Generic.List[Microsoft.Identity.Client.IPublicClientApplication]] $PublicClientApplications = New-Object 'System.Collections.Generic.List[Microsoft.Identity.Client.IPublicClientApplication]'
 [System.Collections.Generic.List[Microsoft.Identity.Client.IConfidentialClientApplication]] $ConfidentialClientApplications = New-Object 'System.Collections.Generic.List[Microsoft.Identity.Client.IConfidentialClientApplication]'
-$script:ModuleState = @{
-    DeviceRegistrationStatus = $null
-    UseWebView2 = $true
-}
+

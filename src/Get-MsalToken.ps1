@@ -17,6 +17,47 @@
     PS C:\>$MsalClientApplication = Get-MsalClientApplication -ClientId '00000000-0000-0000-0000-000000000000' -ClientCertificate $ClientCertificate -TenantId '00000000-0000-0000-0000-000000000000'
     PS C:\>$MsalClientApplication | Get-MsalToken -Scopes 'https://graph.microsoft.com/.default'
     Pipe in confidential client options object to get a confidential client application using a client certificate and target a specific tenant.
+.EXAMPLE
+    PS C:\>Get-MsalToken -ClientId '00000000-0000-0000-0000-000000000000' -EnableContinuousAccessEvaluation -Scopes 'https://graph.microsoft.com/User.Read'
+    Get an AccessToken configured for Continuous Access Evaluation (CAE), which allows sessions to stay valid longer while maintaining security through real-time policy evaluation.
+.EXAMPLE
+    PS C:\>Get-MsalToken -ClientId '00000000-0000-0000-0000-000000000000' -Claims '{"access_token":{"nbf":{"essential":true, "value":"1652813508"}}}' -Scopes 'https://graph.microsoft.com/User.Read'
+    Get an AccessToken with specific claims requirements. This is useful for conditional access scenarios that require specific claims in the token.
+.EXAMPLE
+    PS C:\>Get-MsalToken -ClientId '00000000-0000-0000-0000-000000000000' -TokenSource 'Cache' -Scopes 'https://graph.microsoft.com/User.Read'
+    Get an AccessToken from a specific token source (Cache, Broker, or IdentityProvider). This provides more control over how tokens are acquired.
+.EXAMPLE
+    PS C:\>Get-MsalToken -ClientId '00000000-0000-0000-0000-000000000000' -EnablePopToken -Scopes 'https://graph.microsoft.com/User.Read'
+    Get a Proof-of-Possession (PoP) token, which binds the token to a specific client for enhanced security.
+.EXAMPLE
+    PS C:\>Get-MsalToken -ClientId '00000000-0000-0000-0000-000000000000' -ClientCapabilities @('CP1') -Scopes 'https://graph.microsoft.com/User.Read'
+    Get an AccessToken with client capabilities specified. CP1 is used for Continuous Access Evaluation compliance.
+.EXAMPLE
+    PS C:\>$MsalClientApplication = New-MsalClientApplication -ClientId '00000000-0000-0000-0000-000000000000' -EnableContinuousAccessEvaluation -AzureRegion 'westus2'
+    PS C:\>$MsalClientApplication | Get-MsalToken -Scopes 'https://graph.microsoft.com/User.Read'
+    Create a client application with CAE and regional authority enabled, then request a token with those settings.
+#>
+
+
+<#
+.SYNOPSIS
+    Acquire a token using MSAL.NET library.
+.DESCRIPTION
+    This command will acquire OAuth tokens for both public and confidential clients. Public clients authentication can be interactive, integrated Windows auth, or silent (aka refresh token authentication).
+.EXAMPLE
+    PS C:\>Get-MsalToken -ClientId '00000000-0000-0000-0000-000000000000' -Scopes 'https://graph.microsoft.com/User.Read','https://graph.microsoft.com/Files.ReadWrite'
+    Get AccessToken (with MS Graph permissions User.Read and Files.ReadWrite) and IdToken using client id from application registration (public client).
+.EXAMPLE
+    PS C:\>Get-MsalToken -ClientId '00000000-0000-0000-0000-000000000000' -TenantId '00000000-0000-0000-0000-000000000000' -Interactive -Scopes 'https://graph.microsoft.com/User.Read' -LoginHint user@domain.com
+    Force interactive authentication to get AccessToken (with MS Graph permissions User.Read) and IdToken for specific Azure AD tenant and UPN using client id from application registration (public client).
+.EXAMPLE
+    PS C:\>Get-MsalToken -ClientId '00000000-0000-0000-0000-000000000000' -ClientSecret (ConvertTo-SecureString 'SuperSecretString' -AsPlainText -Force) -TenantId '00000000-0000-0000-0000-000000000000' -Scopes 'https://graph.microsoft.com/.default'
+    Get AccessToken (with MS Graph permissions .Default) and IdToken for specific Azure AD tenant using client id and secret from application registration (confidential client).
+.EXAMPLE
+    PS C:\>$ClientCertificate = Get-Item Cert:\CurrentUser\My\0000000000000000000000000000000000000000
+    PS C:\>$MsalClientApplication = Get-MsalClientApplication -ClientId '00000000-0000-0000-0000-000000000000' -ClientCertificate $ClientCertificate -TenantId '00000000-0000-0000-0000-000000000000'
+    PS C:\>$MsalClientApplication | Get-MsalToken -Scopes 'https://graph.microsoft.com/.default'
+    Pipe in confidential client options object to get a confidential client application using a client certificate and target a specific tenant.
 #>
 function Get-MsalToken {
     [CmdletBinding(DefaultParameterSetName = 'PublicClient')]
@@ -311,6 +352,8 @@ function Get-MsalToken {
                             Write-Debug ('{0}: {1}' -f $_.Exception.GetType().Name, $_.Exception.Message)
                             ## Revert to Interactive Authentication
                             Write-Verbose ('Attempting Interactive Authentication to Application with ClientId [{0}]' -f $ClientApplication.ClientId)
+
+
                             $AuthenticationResult = Get-MsalToken -Interactive -PublicClientApplication $PublicClientApplication @paramGetMsalToken
                         }
                     }
@@ -343,11 +386,11 @@ function Get-MsalToken {
                 Write-Debug ('Aquiring Token for Application with ClientId [{0}]' -f $ClientApplication.ClientId)
                 if (!$Timeout) { $Timeout = [timespan]::Zero }
 
-                ## Wait for async task to complete
-                $tokenSource = New-Object System.Threading.CancellationTokenSource
                 try {
+                    # Create a CancellationToken if needed but don't assign directly to a variable called tokenSource
+                    $cancellationTokenSource = New-Object System.Threading.CancellationTokenSource
                     #$AuthenticationResult = $AquireTokenParameters.ExecuteAsync().GetAwaiter().GetResult()
-                    $taskAuthenticationResult = $AquireTokenParameters.ExecuteAsync($tokenSource.Token)
+                    $taskAuthenticationResult = $AquireTokenParameters.ExecuteAsync($cancellationTokenSource.Token)
                     try {
                         $endTime = [datetime]::Now.Add($Timeout)
                         while (!$taskAuthenticationResult.IsCompleted) {
@@ -355,7 +398,7 @@ function Get-MsalToken {
                                 Start-Sleep -Seconds 1
                             }
                             else {
-                                $tokenSource.Cancel()
+                                $cancellationTokenSource.Cancel()
                                 try { $taskAuthenticationResult.Wait() }
                                 catch { }
                                 Write-Error -Exception (New-Object System.TimeoutException) -Category ([System.Management.Automation.ErrorCategory]::OperationTimeout) -CategoryActivity $MyInvocation.MyCommand -ErrorId 'GetMsalTokenFailureOperationTimeout' -TargetObject $AquireTokenParameters -ErrorAction Stop
@@ -365,9 +408,9 @@ function Get-MsalToken {
                     finally {
                         if (!$taskAuthenticationResult.IsCompleted) {
                             Write-Debug ('Canceling Token Acquisition for Application with ClientId [{0}]' -f $ClientApplication.ClientId)
-                            $tokenSource.Cancel()
+                            $cancellationTokenSource.Cancel()
                         }
-                        $tokenSource.Dispose()
+                        $cancellationTokenSource.Dispose()
                     }
 
                     ## Parse task results
@@ -382,7 +425,7 @@ function Get-MsalToken {
                     }
                 }
                 catch {
-                    Write-Error -Exception (Coalesce $_.Exception.InnerException,$_.Exception) -Category ([System.Management.Automation.ErrorCategory]::AuthenticationError) -CategoryActivity $MyInvocation.MyCommand -ErrorId 'GetMsalTokenFailureAuthenticationError' -TargetObject $AquireTokenParameters -ErrorAction Stop
+                    Write-Error -Exception (Coalesce $_.Exception.InnerException, $_.Exception) -Category ([System.Management.Automation.ErrorCategory]::AuthenticationError) -CategoryActivity $MyInvocation.MyCommand -ErrorId 'GetMsalTokenFailureAuthenticationError' -TargetObject $AquireTokenParameters -ErrorAction Stop
                 }
                 break
             }
