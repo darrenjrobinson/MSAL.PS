@@ -15,20 +15,7 @@
     PS C:\>$ConfidentialClientOptions = New-Object Microsoft.Identity.Client.ConfidentialClientApplicationOptions -Property @{ ClientId = '00000000-0000-0000-0000-000000000000'; TenantId = '00000000-0000-0000-0000-000000000000' }
     PS C:\>$ConfidentialClientOptions | New-MsalClientApplication -ClientCertificate $ClientCertificate
     Pipe in confidential client options object to get a confidential client application using a client certificate and target a specific tenant.
-.EXAMPLE
-    PS C:\>New-MsalClientApplication -ClientId '00000000-0000-0000-0000-000000000000' -EnableContinuousAccessEvaluation
-    Create a public client application with Continuous Access Evaluation (CAE) enabled.
-.EXAMPLE
-    PS C:\>New-MsalClientApplication -ClientId '00000000-0000-0000-0000-000000000000' -EnablePoPTokenGeneration
-    Create a public client application with Proof of Possession (PoP) token generation enabled.
-.EXAMPLE
-    PS C:\>New-MsalClientApplication -ClientId '00000000-0000-0000-0000-000000000000' -AzureRegion 'westus2'
-    Create a client application that communicates with a specific Azure regional instance.
-.EXAMPLE
-    PS C:\>New-MsalClientApplication -ClientId '00000000-0000-0000-0000-000000000000' -ClientCertificate $ClientCertificate -EnableRefreshTokenForCAEProtectedResource
-    Create a confidential client application that can refresh tokens for resources protected by Continuous Access Evaluation.
 #>
-
 function New-MsalClientApplication {
     [CmdletBinding(DefaultParameterSetName = 'PublicClient')]
     [OutputType([Microsoft.Identity.Client.PublicClientApplication], [Microsoft.Identity.Client.ConfidentialClientApplication])]
@@ -83,9 +70,6 @@ function New-MsalClientApplication {
         # Allows usage of experimental features and APIs.
         [Parameter(Mandatory = $false, ValueFromPipelineByPropertyName = $true)]
         [switch] $EnableExperimentalFeatures,
-        # Enables Continuous Access Evaluation
-        [Parameter(Mandatory = $false, ValueFromPipelineByPropertyName = $true)]
-        [switch] $EnableContinuousAccessEvaluation,
         # Add Application and TokenCache to list for this PowerShell session.
         #[Parameter(Mandatory=$false, ValueFromPipelineByPropertyName=$true)]
         #[switch] $AddToSessionCache,
@@ -100,135 +84,78 @@ function New-MsalClientApplication {
         [Microsoft.Identity.Client.ConfidentialClientApplicationOptions] $ConfidentialClientOptions
     )
 
-
-    begin {
-
-        ## Create list to capture multiple fields or multiple choices.
-        [System.Collections.Generic.List[System.Management.Automation.Host.FieldDescription]] $listFields = New-Object System.Collections.Generic.List[System.Management.Automation.Host.FieldDescription]
-        [System.Collections.Generic.List[System.Management.Automation.Host.ChoiceDescription]] $listChoices = New-Object System.Collections.Generic.List[System.Management.Automation.Host.ChoiceDescription]
-
-
-
-        # Initialize module state if not already done
-        if (-not (Get-Variable -Name ModuleState -Scope Script -ErrorAction SilentlyContinue)) {
-            $script:ModuleState = @{
-                DeviceRegistrationStatus = $null
-                UseWebView2              = $true
+    switch -Wildcard ($PSCmdlet.ParameterSetName) {
+        "PublicClient*" {
+            if ($PublicClientOptions) {
+                $ClientApplicationBuilder = [Microsoft.Identity.Client.PublicClientApplicationBuilder]::CreateWithApplicationOptions($PublicClientOptions)
             }
-        }
+            else {
+                $ClientApplicationBuilder = [Microsoft.Identity.Client.PublicClientApplicationBuilder]::Create($ClientId)
+            }
 
-        # Check MSAL.NET library version capabilities
-        $script:MsalNetLibraryCapabilities = @{
-            ContinuousAccessEvaluationSupported = $false
+            ## Check Device Registration Status
+            if (!$script:ModuleState.DeviceRegistrationStatus) {
+                $script:ModuleState.DeviceRegistrationStatus = Get-DeviceRegistrationStatus
+                $script:ModuleState.UseWebView2 = $script:ModuleFeatureSupport.WebView2Support -and ($script:ModuleState.DeviceRegistrationStatus['AzureAdPrt'] -eq 'NO' -or !$script:ModuleFeatureSupport.WebView1Support)
+            }
+
+            if ($PSBoundParameters.ContainsKey('EnableExperimentalFeatures')) { [void] $ClientApplicationBuilder.WithExperimentalFeatures($EnableExperimentalFeatures) }  # Must be called before other experimental features
+            if ($script:ModuleState.UseWebView2) { [void] [Microsoft.Identity.Client.Desktop.DesktopExtensions]::WithDesktopFeatures($ClientApplicationBuilder) }
+            if ($RedirectUri) { [void] $ClientApplicationBuilder.WithRedirectUri($RedirectUri.AbsoluteUri) }
+            elseif (!$PublicClientOptions -or !$PublicClientOptions.RedirectUri) {
+                if ($script:ModuleState.UseWebView2) { [void] $ClientApplicationBuilder.WithRedirectUri('https://login.microsoftonline.com/common/oauth2/nativeclient') }
+                else { [void] $ClientApplicationBuilder.WithDefaultRedirectUri() }
+            }
+            if ($PSBoundParameters.ContainsKey('AuthenticationBroker')) {
+                if ([System.Environment]::OSVersion.Platform -eq 'Win32NT') { [void] [Microsoft.Identity.Client.Desktop.WamExtension]::WithWindowsBroker($ClientApplicationBuilder, $AuthenticationBroker) }
+                else { [void] $ClientApplicationBuilder.WithBroker($AuthenticationBroker) }
+            }
+
+            $ClientOptions = $PublicClientOptions
+        }
+        "ConfidentialClient*" {
+            if ($ConfidentialClientOptions) {
+                $ClientApplicationBuilder = [Microsoft.Identity.Client.ConfidentialClientApplicationBuilder]::CreateWithApplicationOptions($ConfidentialClientOptions)
+            }
+            else {
+                $ClientApplicationBuilder = [Microsoft.Identity.Client.ConfidentialClientApplicationBuilder]::Create($ClientId)
+            }
+
+            if ($PSBoundParameters.ContainsKey('EnableExperimentalFeatures')) { [void] $ClientApplicationBuilder.WithExperimentalFeatures($EnableExperimentalFeatures) }  # Must be called before other experimental features
+            if ($ClientSecret) { [void] $ClientApplicationBuilder.WithClientSecret((ConvertFrom-SecureStringAsPlainText $ClientSecret -Force)) }
+            if ($ClientAssertion) { [void] $ClientApplicationBuilder.WithClientAssertion($ClientAssertion) }
+            if ($ClientClaims) { [void] $ClientApplicationBuilder.WithClientClaims($ClientCertificate, (ConvertTo-Dictionary $ClientClaims -KeyType ([string]) -ValueType ([string]))) }
+            elseif ($ClientCertificate) { [void] $ClientApplicationBuilder.WithCertificate($ClientCertificate) }
+            if ($RedirectUri) { [void] $ClientApplicationBuilder.WithRedirectUri($RedirectUri.AbsoluteUri) }
+
+            $ClientOptions = $ConfidentialClientOptions
+        }
+        "*" {
+            if ($ClientId) { [void] $ClientApplicationBuilder.WithClientId($ClientId) }
+            if ($AzureCloudInstance -and $TenantId) { [void] $ClientApplicationBuilder.WithAuthority($AzureCloudInstance, $TenantId) }
+            elseif ($TenantId) { [void] $ClientApplicationBuilder.WithTenantId($TenantId) }
+            if ($Authority) { [void] $ClientApplicationBuilder.WithAuthority($Authority) }
+            if (!$ClientOptions -or !($ClientOptions.ClientName -or $ClientOptions.ClientVersion)) {
+                [void] $ClientApplicationBuilder.WithClientName("PowerShell $($PSVersionTable.PSEdition)")
+                [void] $ClientApplicationBuilder.WithClientVersion($PSVersionTable.PSVersion)
+            }
+            if ($ExtraQueryParameters) { [void] $ClientApplicationBuilder.WithExtraQueryParameters((ConvertTo-Dictionary $ExtraQueryParameters -KeyType ([string]) -ValueType ([string]))) }
+            #[void] $ClientApplicationBuilder.WithLogging($null, [Microsoft.Identity.Client.LogLevel]::Verbose, $false, $true)
+
+            $ClientApplication = $ClientApplicationBuilder.Build()
+            break
         }
     }
 
-    process {
-        switch -Wildcard ($PSCmdlet.ParameterSetName) {
-            "PublicClient*" {
-                if ($PublicClientOptions) {
-                    $ClientApplicationBuilder = [Microsoft.Identity.Client.PublicClientApplicationBuilder]::CreateWithApplicationOptions($PublicClientOptions)
-                }
-                else {
-                    $ClientApplicationBuilder = [Microsoft.Identity.Client.PublicClientApplicationBuilder]::Create($ClientId)
-                }
+    ## Add to local PowerShell session cache.
+    # if ($AddToSessionCache) {
+    #     Add-MsalClientApplication $ClientApplication
+    # }
 
-                ## Check Device Registration Status
-                if (!$script:ModuleState.DeviceRegistrationStatus) {
-                    $script:ModuleState.DeviceRegistrationStatus = Get-DeviceRegistrationStatus
-                    $script:ModuleState.UseWebView2 = $script:ModuleFeatureSupport.WebView2Support -and ($script:ModuleState.DeviceRegistrationStatus['AzureAdPrt'] -eq 'NO' -or !$script:ModuleFeatureSupport.WebView1Support)
-                }
+    ## Enable custom serialization of TokenCache to disk
+    # if ($UseTokenCacheOnDisk) {
+    #     Enable-MsalTokenCacheOnDisk $ClientApplication
+    # }
 
-                if ($PSBoundParameters.ContainsKey('EnableExperimentalFeatures')) { [void] $ClientApplicationBuilder.WithExperimentalFeatures($EnableExperimentalFeatures) }  # Must be called before other experimental features
-                if ($script:ModuleState.UseWebView2) { [void] [Microsoft.Identity.Client.Desktop.DesktopExtensions]::WithDesktopFeatures($ClientApplicationBuilder) }
-                if ($RedirectUri) { [void] $ClientApplicationBuilder.WithRedirectUri($RedirectUri.AbsoluteUri) }
-                elseif (!$PublicClientOptions -or !$PublicClientOptions.RedirectUri) {
-                    # Support multiple standard redirect URIs for better compatibility
-                    [void] $ClientApplicationBuilder.WithRedirectUri('https://login.microsoftonline.com/common/oauth2/nativeclient')
-                    # You might also consider adding other standard redirect URIs like:
-                    # - 'http://localhost/'
-                    # - 'urn:ietf:wg:oauth:2.0:oob'
-                }
-                if ($PSBoundParameters.ContainsKey('AuthenticationBroker')) {
-                    if ([System.Environment]::OSVersion.Platform -eq 'Win32NT') { [void] [Microsoft.Identity.Client.Desktop.WamExtension]::WithWindowsBroker($ClientApplicationBuilder, $AuthenticationBroker) }
-                    else { [void] $ClientApplicationBuilder.WithBroker($AuthenticationBroker) }
-                }
-
-                # Enable Continuous Access Evaluation for public clients if requested
-                if ($PSBoundParameters.ContainsKey('EnableContinuousAccessEvaluation') -and $EnableContinuousAccessEvaluation) {
-                    try {
-                        if ($ClientApplicationBuilder.GetType().GetMethod("WithClientCapabilities")) {
-                            [void] $ClientApplicationBuilder.WithClientCapabilities(("cp1"))
-                        }
-                    }
-                    catch {
-                        Write-Warning "Failed to enable Continuous Access Evaluation for public client: $($_.Exception.Message)"
-                    }
-                }
-
-                $ClientOptions = $PublicClientOptions
-            }
-            "ConfidentialClient*" {
-                if ($ConfidentialClientOptions) {
-                    $ClientApplicationBuilder = [Microsoft.Identity.Client.ConfidentialClientApplicationBuilder]::CreateWithApplicationOptions($ConfidentialClientOptions)
-                }
-                else {
-                    $ClientApplicationBuilder = [Microsoft.Identity.Client.ConfidentialClientApplicationBuilder]::Create($ClientId)
-                }
-
-                if ($PSBoundParameters.ContainsKey('EnableExperimentalFeatures')) { [void] $ClientApplicationBuilder.WithExperimentalFeatures($EnableExperimentalFeatures) }  # Must be called before other experimental features
-                if ($ClientSecret) { [void] $ClientApplicationBuilder.WithClientSecret((ConvertFrom-SecureStringAsPlainText $ClientSecret -Force)) }
-                if ($ClientAssertion) { [void] $ClientApplicationBuilder.WithClientAssertion($ClientAssertion) }
-                if ($ClientClaims) { [void] $ClientApplicationBuilder.WithClientClaims($ClientCertificate, (ConvertTo-Dictionary $ClientClaims -KeyType ([string]) -ValueType ([string]))) }
-                elseif ($ClientCertificate) { [void] $ClientApplicationBuilder.WithCertificate($ClientCertificate) }
-                if ($RedirectUri) { [void] $ClientApplicationBuilder.WithRedirectUri($RedirectUri.AbsoluteUri) }
-
-                # Enable Continuous Access Evaluation for confidential clients if requested
-                if ($PSBoundParameters.ContainsKey('EnableContinuousAccessEvaluation') -and $EnableContinuousAccessEvaluation) {
-                    try {
-                        if ($ClientApplicationBuilder.GetType().GetMethod("WithClientCapabilities")) {
-                            [void] $ClientApplicationBuilder.WithClientCapabilities(("cp1"))
-                        }
-                    }
-                    catch {
-                        Write-Warning "Failed to enable Continuous Access Evaluation: $($_.Exception.Message)"
-                    }
-                }
-
-                $ClientOptions = $ConfidentialClientOptions
-            }
-            "*" {
-                if ($ClientId) { [void] $ClientApplicationBuilder.WithClientId($ClientId) }
-                if ($AzureCloudInstance -and $TenantId) { [void] $ClientApplicationBuilder.WithAuthority($AzureCloudInstance, $TenantId) }
-                elseif ($TenantId) { [void] $ClientApplicationBuilder.WithTenantId($TenantId) }
-                if ($Authority) { [void] $ClientApplicationBuilder.WithAuthority($Authority) }
-
-                # Only try to enable CAE when specifically requested
-                # Don't use WithContinuousAccessEvaluationEnabled in normal operation
-                # as many resources don't support it and it can cause failures
-
-                if (!$ClientOptions -or !($ClientOptions.ClientName -or $ClientOptions.ClientVersion)) {
-                    [void] $ClientApplicationBuilder.WithClientName("PowerShell $($PSVersionTable.PSEdition)")
-                    [void] $ClientApplicationBuilder.WithClientVersion($PSVersionTable.PSVersion)
-                }
-                if ($ExtraQueryParameters) { [void] $ClientApplicationBuilder.WithExtraQueryParameters((ConvertTo-Dictionary $ExtraQueryParameters -KeyType ([string]) -ValueType ([string]))) }
-                #[void] $ClientApplicationBuilder.WithLogging($null, [Microsoft.Identity.Client.LogLevel]::Verbose, $false, $true)
-
-                $ClientApplication = $ClientApplicationBuilder.Build()
-                break
-            }
-        }
-
-        ## Add to local PowerShell session cache.
-        # if ($AddToSessionCache) {
-        #     Add-MsalClientApplication $ClientApplication
-        # }
-
-        ## Enable custom serialization of TokenCache to disk
-        # if ($UseTokenCacheOnDisk) {
-        #     Enable-MsalTokenCacheOnDisk $ClientApplication
-        # }
-
-        return $ClientApplication
-    }
+    return $ClientApplication
 }

@@ -10,7 +10,7 @@
 RootModule = 'MSAL.PS.psm1'
 
 # Version number of this module.
-ModuleVersion = '4.69.1'
+ModuleVersion = '4.37.0'
 
 # Supported PSEditions
 CompatiblePSEditions = 'Core','Desktop'
@@ -19,7 +19,7 @@ CompatiblePSEditions = 'Core','Desktop'
 GUID = 'c765c957-c730-4520-9c36-6a522e35d60b'
 
 # Author of this module
-Author = 'Jason Thompson, updated by Darren J Robinson'
+Author = 'Jason Thompson'
 
 # Company or vendor of this module
 CompanyName = 'Microsoft Corporation'
@@ -91,7 +91,6 @@ NestedModules = @(
     '.\New-MsalClientApplication.ps1'
     '.\Remove-MsalClientApplication.ps1'
     '.\Select-MsalClientApplication.ps1'
-    '.\Set-MsalAccountBinding.ps1'
 )
 
 # Functions to export from this module
@@ -106,7 +105,6 @@ FunctionsToExport = @(
     'New-MsalClientApplication'
     'Remove-MsalClientApplication'
     'Select-MsalClientApplication'
-    'Set-MsalAccountBinding'
 )
 
 # Cmdlets to export from this module
@@ -141,10 +139,10 @@ PrivateData = @{
         Tags = 'Microsoft', 'Identity', 'Azure', 'AzureActiveDirectory', 'AzureAD', 'AAD', 'ActiveDirectory', 'AD', 'ActiveDirectoryFederationServices', 'ADFS', 'Microsoft.Identity.Client', 'MicrosoftAuthenticationLibrary', 'MSAL', 'OAuth', 'OpenIdConnect', 'OIDC', 'AzureAutomationNotSupported', 'PSEdition_Desktop', 'PSEdition_Core', 'Windows', 'Linux', 'MacOS'
 
         # A URL to the license for this module.
-        LicenseUri = 'https://raw.githubusercontent.com/darrenjrobinson/MSAL.PS/master/LICENSE'
+        LicenseUri = 'https://raw.githubusercontent.com/jasoth/MSAL.PS/master/LICENSE'
 
         # A URL to the main website for this project.
-        ProjectUri = 'https://github.com/darrenjrobinson/MSAL.PS'
+        ProjectUri = 'https://github.com/jasoth/MSAL.PS'
 
         # A URL to an icon representing this module.
         # IconUri = ''
